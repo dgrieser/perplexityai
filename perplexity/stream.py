@@ -7,8 +7,11 @@ class AnswerStreamParser:
     def __init__(self) -> None:
         self.text = ""
         self._chunk_count = 0
+        self._source_urls: set[str] = set()
+        self.sources: list[dict[str, str]] = []
 
     def feed(self, event: Dict[str, Any]) -> str:
+        self._collect_sources(event)
         state = self._event_state(event)
         if state is None:
             return ""
@@ -37,6 +40,44 @@ class AnswerStreamParser:
             delta = self.feed(event)
             if delta:
                 yield delta
+
+    def format_sources(self) -> str:
+        if not self.sources:
+            return ""
+
+        lines = ["", "Sources:"]
+        for index, source in enumerate(self.sources, start=1):
+            name = source.get("name") or source.get("url") or "Source"
+            url = source.get("url", "")
+            lines.append(f"[{index}] {name}")
+            if url:
+                lines.append(f"    {url}")
+        return "\n".join(lines)
+
+    def _collect_sources(self, event: Dict[str, Any]) -> None:
+        blocks = event.get("blocks")
+        if not isinstance(blocks, list):
+            return
+
+        for block in blocks:
+            web_result_block = block.get("web_result_block")
+            if not isinstance(web_result_block, dict):
+                continue
+            web_results = web_result_block.get("web_results")
+            if not isinstance(web_results, list):
+                continue
+            for result in web_results:
+                if not isinstance(result, dict):
+                    continue
+                url = result.get("url")
+                if not isinstance(url, str) or not url or url in self._source_urls:
+                    continue
+                name = result.get("name")
+                self._source_urls.add(url)
+                self.sources.append({
+                    "name": name if isinstance(name, str) else url,
+                    "url": url,
+                })
 
     def _event_state(self, event: Dict[str, Any]) -> Optional[tuple[str, int]]:
         blocks = event.get("blocks")
