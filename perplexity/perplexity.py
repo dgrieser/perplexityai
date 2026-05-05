@@ -59,7 +59,10 @@ class Perplexity:
     def _login(self, email: str, ps: dict = None) -> None:
         self.session.post(url="https://www.perplexity.ai/api/auth/signin-email", data={"email": email})
 
-        email_input: str = str(input("Token (or link) received via email: ")).strip()
+        import sys
+        sys.stderr.write("Token (or link) received via email: ")
+        sys.stderr.flush()
+        email_input: str = sys.stdin.readline().strip()
         if email_input.startswith("http"):
             email_link = email_input
         else:
