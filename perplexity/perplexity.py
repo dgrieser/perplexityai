@@ -1,5 +1,6 @@
 from typing import Iterable, Dict
 
+from urllib.parse import quote
 from os import listdir
 from uuid import uuid4
 from time import sleep, time
@@ -55,7 +56,11 @@ class Perplexity:
     def _login(self, email: str, ps: dict = None) -> None:
         self.session.post(url="https://www.perplexity.ai/api/auth/signin-email", data={"email": email})
 
-        email_link: str = str(input("paste the link you received by email: "))
+        email_input: str = str(input("Token (or link) received via email: ")).strip()
+        if email_input.startswith("http"):
+            email_link = email_input
+        else:
+            email_link = f"https://www.perplexity.ai/api/auth/callback/email?callbackUrl=defaultMobileSignIn&email={quote(email)}&token={email_input}"
         self.session.get(email_link)
 
         if ps:
