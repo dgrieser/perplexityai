@@ -2,6 +2,8 @@ from typing import Iterable, Dict
 
 from urllib.parse import quote
 from os import listdir
+from pathlib import Path
+from re import sub
 from uuid import uuid4
 from time import sleep, time
 from threading import Thread
@@ -16,7 +18,7 @@ class Perplexity:
         self.user_agent: dict = { "User-Agent": "Ask/2.9.1/2406 (iOS; iPhone; Version 17.1) isiOSOnMac/false", "X-Client-Name": "Perplexity-iOS", "X-App-ApiClient": "ios" }
         self.session.headers.update(self.user_agent)
 
-        if email and ".perplexity_session" in listdir():
+        if email and self._token_path(email).exists():
             self._recover_session(email)
         else:
             self._init_session_without_login()
@@ -44,15 +46,16 @@ class Perplexity:
         while not (self.ws.sock and self.ws.sock.connected):
             sleep(0.01)
 
-    def _recover_session(self, email: str) -> None:
-        with open(".perplexity_session", "r") as f:
-            perplexity_session: dict = loads(f.read())
+    def _token_path(self, email: str) -> Path:
+        safe = sub(r"[^a-zA-Z0-9-]", "_", email)
+        path = Path.home() / ".cache" / "perplexity-cli"
+        path.mkdir(parents=True, exist_ok=True)
+        return path / f"{safe}.token"
 
-        if email in perplexity_session:
-            self.session.cookies.update(perplexity_session[email])
-        else:
-            self._login(email, perplexity_session)
-    
+    def _recover_session(self, email: str) -> None:
+        cookies = loads(self._token_path(email).read_text())
+        self.session.cookies.update(cookies)
+
     def _login(self, email: str, ps: dict = None) -> None:
         self.session.post(url="https://www.perplexity.ai/api/auth/signin-email", data={"email": email})
 
@@ -63,13 +66,7 @@ class Perplexity:
             email_link = f"https://www.perplexity.ai/api/auth/callback/email?callbackUrl=defaultMobileSignIn&email={quote(email)}&token={email_input}"
         self.session.get(email_link)
 
-        if ps:
-            ps[email] = self.session.cookies.get_dict()
-        else:
-            ps = {email: self.session.cookies.get_dict()}
-
-        with open(".perplexity_session", "w") as f:
-            f.write(dumps(ps))
+        self._token_path(email).write_text(dumps(self.session.cookies.get_dict()))
 
     def _init_session_without_login(self) -> None:
         self.session.get(url=f"https://www.perplexity.ai/search/{str(uuid4())}")
@@ -309,10 +306,4 @@ class Perplexity:
         self.ws.close()
 
         if self.email:
-            with open(".perplexity_session", "r") as f:
-                perplexity_session: dict = loads(f.read())
-
-            perplexity_session[self.email] = self.session.cookies.get_dict()
-
-            with open(".perplexity_session", "w") as f:
-                f.write(dumps(perplexity_session))
+            self._token_path(self.email).write_text(dumps(self.session.cookies.get_dict()))
