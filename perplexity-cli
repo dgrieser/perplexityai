@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
+import argparse
+import argcomplete
+from perplexity import Perplexity
+
+parser = argparse.ArgumentParser(description="Perplexity CLI")
+parser.add_argument("-a", "--account", metavar="EMAIL", help="account email for authenticated requests")
+parser.add_argument("prompt", nargs="+", help="search prompt")
+argcomplete.autocomplete(parser)
+args = parser.parse_args()
+
+perplexity = Perplexity(args.account)
+answer = perplexity.search(" ".join(args.prompt))
+for a in answer:
+    print(a)
+perplexity.close()
