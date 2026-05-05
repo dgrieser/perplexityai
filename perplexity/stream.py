@@ -8,6 +8,7 @@ class AnswerStreamParser:
         self.text = ""
         self._chunk_count = 0
         self._source_urls: set[str] = set()
+        self._annotations: list[dict[str, Any]] = []
         self.sources: list[dict[str, str]] = []
 
     def feed(self, event: Dict[str, Any]) -> str:
@@ -41,12 +42,31 @@ class AnswerStreamParser:
             if delta:
                 yield delta
 
-    def format_sources(self) -> str:
-        if not self.sources:
+    def format_answer(self, citations: bool = False) -> str:
+        if not citations:
+            return self.text
+
+        markers = self._citation_markers()
+        if not markers:
+            return self.text
+
+        text = self.text
+        for offset, marker in sorted(markers.items(), reverse=True):
+            if 0 <= offset <= len(text):
+                text = text[:offset] + marker + text[offset:]
+        return text
+
+    def has_citations(self) -> bool:
+        return bool(self._citation_markers())
+
+    def format_sources(self, cited_only: bool = False) -> str:
+        sources = self._cited_sources() if cited_only else self.sources
+        if not sources:
             return ""
 
         lines = ["", "Sources:"]
-        for index, source in enumerate(self.sources, start=1):
+        for default_index, source in enumerate(sources, start=1):
+            index = source.get("number", str(default_index))
             name = source.get("name") or source.get("url") or "Source"
             url = source.get("url", "")
             lines.append(f"[{index}] {name}")
@@ -87,13 +107,17 @@ class AnswerStreamParser:
         for usage in ("ask_text_0_markdown", "ask_text"):
             for block in blocks:
                 if block.get("intended_usage") == usage:
-                    state = self._markdown_block_state(block.get("markdown_block"))
+                    markdown_block = block.get("markdown_block")
+                    self._collect_annotations(markdown_block)
+                    state = self._markdown_block_state(markdown_block)
                     if state is not None:
                         return state
 
         for block in blocks:
             if isinstance(block.get("markdown_block"), dict):
-                state = self._markdown_block_state(block["markdown_block"])
+                markdown_block = block["markdown_block"]
+                self._collect_annotations(markdown_block)
+                state = self._markdown_block_state(markdown_block)
                 if state is not None:
                     return state
 
@@ -128,3 +152,121 @@ class AnswerStreamParser:
             if left[index] != right[index]:
                 return index
         return length
+
+    def _collect_annotations(self, block: Any) -> None:
+        if not isinstance(block, dict):
+            return
+
+        annotations = block.get("inline_token_annotations")
+        if not isinstance(annotations, list):
+            return
+
+        self._annotations = [
+            annotation for annotation in annotations
+            if isinstance(annotation, dict)
+        ]
+
+    def _citation_markers(self) -> dict[int, str]:
+        markers: dict[int, list[int]] = {}
+        for annotation in self._annotations:
+            end = self._annotation_end(annotation)
+            if end is None:
+                continue
+            numbers = self._annotation_source_numbers(annotation)
+            if not numbers:
+                continue
+            markers.setdefault(end, [])
+            for number in numbers:
+                if number not in markers[end]:
+                    markers[end].append(number)
+
+        return {
+            offset: "".join(f"[{number}]" for number in sorted(numbers))
+            for offset, numbers in markers.items()
+        }
+
+    def _annotation_end(self, annotation: dict[str, Any]) -> Optional[int]:
+        for key in ("end", "end_index", "end_offset", "stop", "stop_index"):
+            value = annotation.get(key)
+            if isinstance(value, int):
+                return value
+
+        span = annotation.get("span") or annotation.get("text_span") or annotation.get("token_span")
+        if isinstance(span, dict):
+            for key in ("end", "end_index", "end_offset", "stop", "stop_index"):
+                value = span.get(key)
+                if isinstance(value, int):
+                    return value
+
+        return None
+
+    def _annotation_source_numbers(self, annotation: dict[str, Any]) -> list[int]:
+        values = []
+        for key in (
+            "source_index", "source_indices", "source_ids", "source_id",
+            "citation_index", "citation_indices", "citation_ids", "citation_id",
+            "web_result_index", "web_result_indices",
+        ):
+            if key in annotation:
+                values.extend(self._flatten(annotation[key]))
+
+        for key in ("url", "source_url", "citation_url"):
+            value = annotation.get(key)
+            if isinstance(value, str):
+                number = self._source_number_for_url(value)
+                if number:
+                    values.append(number)
+
+        numbers: list[int] = []
+        for value in values:
+            number = self._normalize_source_number(value)
+            if number and number not in numbers:
+                numbers.append(number)
+        return numbers
+
+    def _normalize_source_number(self, value: Any) -> Optional[int]:
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+        if not isinstance(value, int):
+            return None
+        if 0 <= value < len(self.sources):
+            return value + 1
+        if 1 <= value <= len(self.sources):
+            return value
+        return None
+
+    def _source_number_for_url(self, url: str) -> Optional[int]:
+        for index, source in enumerate(self.sources, start=1):
+            if source.get("url") == url:
+                return index
+        return None
+
+    def _flatten(self, value: Any) -> list[Any]:
+        if isinstance(value, list):
+            values: list[Any] = []
+            for item in value:
+                values.extend(self._flatten(item))
+            return values
+        if isinstance(value, dict):
+            values: list[Any] = []
+            for key in (
+                "index", "indices", "id", "ids", "source_index",
+                "source_indices", "citation_index", "citation_indices",
+                "url", "source_url", "citation_url",
+            ):
+                if key in value:
+                    values.extend(self._flatten(value[key]))
+            return values
+        return [value]
+
+    def _cited_sources(self) -> list[dict[str, str]]:
+        numbers = sorted({
+            number
+            for annotation in self._annotations
+            for number in self._annotation_source_numbers(annotation)
+        })
+        return [
+            {"number": str(number), **self.sources[number - 1]}
+            for number in numbers
+            if 1 <= number <= len(self.sources)
+        ]

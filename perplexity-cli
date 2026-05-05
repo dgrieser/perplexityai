@@ -23,15 +23,19 @@ try:
             print(a)
             continue
         delta = stream_parser.feed(a)
-        if delta:
+        if delta and not args.sources:
             sys.stdout.write(delta)
             sys.stdout.flush()
     if args.raw:
         pass
+    elif args.sources:
+        sys.stdout.write(stream_parser.format_answer(citations=True))
+        if stream_parser.text:
+            sys.stdout.write("\n")
     elif stream_parser.text:
         sys.stdout.write("\n")
     if not args.raw and args.sources:
-        sources = stream_parser.format_sources()
+        sources = stream_parser.format_sources(cited_only=stream_parser.has_citations())
         if sources:
             sys.stdout.write(sources + "\n")
     sys.stdout.flush()
