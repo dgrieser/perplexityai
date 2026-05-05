@@ -10,8 +10,11 @@ parser.add_argument("prompt", nargs="+", help="search prompt")
 argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
-perplexity = Perplexity(args.account)
-answer = perplexity.search(" ".join(args.prompt))
-for a in answer:
-    print(a)
-perplexity.close()
+try:
+    perplexity = Perplexity(args.account)
+    answer = perplexity.search(" ".join(args.prompt))
+    for a in answer:
+        print(a)
+    perplexity.close()
+except KeyboardInterrupt:
+    raise SystemExit(130)
