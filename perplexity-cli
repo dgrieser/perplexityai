@@ -7,13 +7,14 @@ from perplexity import AnswerStreamParser, Perplexity
 
 parser = argparse.ArgumentParser(description="Perplexity CLI")
 parser.add_argument("-a", "--account", metavar="EMAIL", help="account email for authenticated requests")
+parser.add_argument("-p", "--pro", action="store_true", help="use Pro search")
 parser.add_argument("prompt", nargs="+", help="search prompt")
 argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
 try:
     perplexity = Perplexity(args.account)
-    answer = perplexity.search(" ".join(args.prompt))
+    answer = perplexity.search(" ".join(args.prompt), mode="copilot" if args.pro else "concise")
     stream_parser = AnswerStreamParser()
     for a in answer:
         delta = stream_parser.feed(a)
