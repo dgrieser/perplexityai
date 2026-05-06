@@ -7,29 +7,27 @@ from re import sub
 from uuid import uuid4
 from time import sleep, time
 from threading import Thread
-from json import loads, dumps
+from json import loads, dumps, JSONDecodeError
 from random import getrandbits
 from websocket import WebSocketApp
 from requests import Session, get, post
+from requests.exceptions import RequestException
 
 class Perplexity:
     def __init__(self, email: str = None) -> None:
-        self.session: Session = Session()
         self.user_agent: dict = { "User-Agent": "Ask/2.9.1/2406 (iOS; iPhone; Version 17.1) isiOSOnMac/false", "X-Client-Name": "Perplexity-iOS", "X-App-ApiClient": "ios" }
-        self.session.headers.update(self.user_agent)
+        self.email: str = email
+        self._reset_session()
 
+        recovered_session = False
         if email and self._token_path(email).exists():
-            self._recover_session(email)
-        else:
+            recovered_session = self._recover_session(email)
+        if not recovered_session:
             self._init_session_without_login()
 
             if email:
                 self._login(email)
 
-        self.email: str = email
-        self.t: str = self._get_t()
-        self.sid: str = self._get_sid()
-    
         self.n: int = 1
         self.base: int = 420
         self.queue: list = []
@@ -38,7 +36,16 @@ class Perplexity:
         self.backend_uuid: str = None # unused because we can't yet follow-up questions
         self.frontend_session_id: str = str(uuid4())
 
-        assert self._ask_anonymous_user(), "failed to ask anonymous user"
+        if not self._bootstrap_socket_session():
+            if email and recovered_session:
+                self._reset_session()
+                self._init_session_without_login()
+                self._login(email)
+                if not self._bootstrap_socket_session():
+                    raise RuntimeError("failed to initialize websocket session after re-login")
+            else:
+                raise RuntimeError("failed to initialize websocket session")
+
         self.ws: WebSocketApp = self._init_websocket()
         self.ws_thread: Thread = Thread(target=self.ws.run_forever).start()
         self._auth_session()
@@ -52,9 +59,26 @@ class Perplexity:
         path.mkdir(parents=True, exist_ok=True)
         return path / f"{safe}.token"
 
-    def _recover_session(self, email: str) -> None:
-        cookies = loads(self._token_path(email).read_text())
+    def _reset_session(self) -> None:
+        self.session: Session = Session()
+        self.session.headers.update(self.user_agent)
+
+    def _recover_session(self, email: str) -> bool:
+        try:
+            cookies = loads(self._token_path(email).read_text())
+        except (OSError, JSONDecodeError):
+            return False
         self.session.cookies.update(cookies)
+        return True
+
+    def _bootstrap_socket_session(self) -> bool:
+        try:
+            self.t = self._get_t()
+            self.sid = self._get_sid()
+            return self._ask_anonymous_user()
+        except (IndexError, KeyError, JSONDecodeError, RequestException):
+            return False
+
 
     def _login(self, email: str, ps: dict = None) -> None:
         self.session.post(url="https://www.perplexity.ai/api/auth/signin-email", data={"email": email})
