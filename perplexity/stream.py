@@ -1,3 +1,4 @@
+from re import Match, search, sub
 from typing import Any, Dict, Iterable, Optional
 
 
@@ -6,6 +7,7 @@ class AnswerStreamParser:
 
     def __init__(self) -> None:
         self.text = ""
+        self.raw_text = ""
         self._chunk_count = 0
         self._source_urls: set[str] = set()
         self._annotations: list[dict[str, Any]] = []
@@ -16,7 +18,9 @@ class AnswerStreamParser:
         state = self._event_state(event)
         if state is None:
             return ""
-        text, chunk_count = state
+        raw_text, chunk_count = state
+        text = self._stable_answer_text(self._format_answer_text(raw_text))
+        self.raw_text = raw_text
 
         if text.startswith(self.text):
             delta = text[len(self.text):]
@@ -139,7 +143,7 @@ class AnswerStreamParser:
         chunk_text = "".join(chunk for chunk in chunks if isinstance(chunk, str))
         offset = block.get("chunk_starting_offset", 0)
         if isinstance(offset, int) and offset == self._chunk_count:
-            return self.text + chunk_text, offset + len(chunks)
+            return self.raw_text + chunk_text, offset + len(chunks)
 
         if offset == 0:
             return chunk_text, len(chunks)
@@ -152,6 +156,42 @@ class AnswerStreamParser:
             if left[index] != right[index]:
                 return index
         return length
+
+    def _format_answer_text(self, text: str) -> str:
+        lines = text.splitlines(keepends=True)
+        in_fence = False
+        formatted_lines = []
+
+        for line in lines:
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                formatted_lines.append(line)
+            elif in_fence:
+                formatted_lines.append(line)
+            else:
+                formatted_lines.append(self._format_inline_citations(line))
+
+        return "".join(formatted_lines)
+
+    def _format_inline_citations(self, text: str) -> str:
+        parts = text.split("`")
+        for index in range(0, len(parts), 2):
+            parts[index] = self._space_citations(parts[index])
+        return "`".join(parts)
+
+    def _space_citations(self, text: str) -> str:
+        def add_space(match: Match[str]) -> str:
+            if match.start() == 0:
+                return match.group(1)
+            return " " + match.group(1)
+
+        return sub(r"(?<![\s\[])(\[\d+\](?:\[\d+\])*)", add_space, text)
+
+    def _stable_answer_text(self, text: str) -> str:
+        incomplete_marker = search(r"(?<![\s\[])\[\d*$", text)
+        if incomplete_marker:
+            return text[:incomplete_marker.start()]
+        return text
 
     def _collect_annotations(self, block: Any) -> None:
         if not isinstance(block, dict):
