@@ -12,6 +12,7 @@ from random import getrandbits
 from websocket import WebSocketApp
 from requests import Session, get, post
 from requests.exceptions import RequestException
+from .config import config_dir, mail_config_for, retrieve_login_url_from_mail
 
 class Perplexity:
     def __init__(self, email: str = None) -> None:
@@ -55,9 +56,7 @@ class Perplexity:
 
     def _token_path(self, email: str) -> Path:
         safe = sub(r"[^a-zA-Z0-9-]", "_", email)
-        path = Path.home() / ".cache" / "perplexity-cli"
-        path.mkdir(parents=True, exist_ok=True)
-        return path / f"{safe}.token"
+        return config_dir() / f"{safe}.token"
 
     def _reset_session(self) -> None:
         self.session: Session = Session()
@@ -84,13 +83,24 @@ class Perplexity:
         self.session.post(url="https://www.perplexity.ai/api/auth/signin-email", data={"email": email})
 
         import sys
-        sys.stderr.write("Token (or link) received via email: ")
-        sys.stderr.flush()
-        email_input: str = sys.stdin.readline().strip()
-        if email_input.startswith("http"):
-            email_link = email_input
-        else:
-            email_link = f"https://www.perplexity.ai/api/auth/callback/email?callbackUrl=defaultMobileSignIn&email={quote(email)}&token={email_input}"
+        email_link = None
+        mail_config = mail_config_for(email)
+        if mail_config:
+            sys.stderr.write("Retrieving Perplexity login token from email...\n")
+            sys.stderr.flush()
+            try:
+                email_link = retrieve_login_url_from_mail(email, mail_config)
+            except Exception as exc:
+                sys.stderr.write(f"Failed to retrieve token from email: {exc}\n")
+                sys.stderr.flush()
+        if not email_link:
+            sys.stderr.write("Token (or link) received via email: ")
+            sys.stderr.flush()
+            email_input: str = sys.stdin.readline().strip()
+            if email_input.startswith("http"):
+                email_link = email_input
+            else:
+                email_link = f"https://www.perplexity.ai/api/auth/callback/email?callbackUrl=defaultMobileSignIn&email={quote(email)}&token={email_input}"
         self.session.get(email_link)
 
         self._token_path(email).write_text(dumps(self.session.cookies.get_dict()))

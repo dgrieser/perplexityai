@@ -3,7 +3,25 @@
 import argparse
 import argcomplete
 import sys
+from perplexity.config import configure_mail
 from perplexity import AnswerStreamParser, Perplexity
+
+if len(sys.argv) > 1 and sys.argv[1] == "config":
+    config_parser = argparse.ArgumentParser(
+        prog=f"{sys.argv[0]} config",
+        description="Configure perplexity-cli",
+    )
+    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
+    config_subparsers.add_parser("mail", help="configure IMAP mail login")
+    config_args = config_parser.parse_args(sys.argv[2:])
+    try:
+        if config_args.config_command == "mail":
+            configure_mail()
+    except KeyboardInterrupt:
+        sys.stderr.write("\n")
+        sys.stderr.flush()
+        raise SystemExit(130)
+    raise SystemExit(0)
 
 parser = argparse.ArgumentParser(description="Perplexity CLI")
 parser.add_argument("-a", "--account", metavar="EMAIL", help="account email for authenticated requests")
@@ -37,4 +55,6 @@ try:
     sys.stdout.flush()
     perplexity.close()
 except KeyboardInterrupt:
+    sys.stderr.write("\n")
+    sys.stderr.flush()
     raise SystemExit(130)
