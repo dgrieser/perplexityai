@@ -1,60 +1,8 @@
 #!/usr/bin/env python3
 # PYTHON_ARGCOMPLETE_OK
-import argparse
-import argcomplete
 import sys
-from perplexity.config import configure_mail
-from perplexity import AnswerStreamParser, Perplexity
 
-if len(sys.argv) > 1 and sys.argv[1] == "config":
-    config_parser = argparse.ArgumentParser(
-        prog=f"{sys.argv[0]} config",
-        description="Configure perplexity-cli",
-    )
-    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
-    config_subparsers.add_parser("mail", help="configure IMAP mail login")
-    config_args = config_parser.parse_args(sys.argv[2:])
-    try:
-        if config_args.config_command == "mail":
-            configure_mail()
-    except KeyboardInterrupt:
-        sys.stderr.write("\n")
-        sys.stderr.flush()
-        raise SystemExit(130)
-    raise SystemExit(0)
+from perplexity.cli import main
 
-parser = argparse.ArgumentParser(description="Perplexity CLI")
-parser.add_argument("-a", "--account", metavar="EMAIL", help="account email for authenticated requests")
-parser.add_argument("-r", "--raw", action="store_true", help="print raw response events")
-parser.add_argument("-s", "--sources", action="store_true", help="append sources")
-parser.add_argument("-p", "--pro", action="store_true", help="use Pro search")
-parser.add_argument("prompt", nargs="+", help="search prompt")
-argcomplete.autocomplete(parser)
-args = parser.parse_args()
 
-try:
-    perplexity = Perplexity(args.account)
-    answer = perplexity.search(" ".join(args.prompt), mode="copilot" if args.pro else "concise")
-    stream_parser = AnswerStreamParser()
-    for a in answer:
-        if args.raw:
-            print(a)
-            continue
-        delta = stream_parser.feed(a)
-        if delta:
-            sys.stdout.write(delta)
-            sys.stdout.flush()
-    if args.raw:
-        pass
-    elif stream_parser.text:
-        sys.stdout.write("\n")
-    if not args.raw and args.sources:
-        sources = stream_parser.format_sources(cited_only=stream_parser.has_citations())
-        if sources:
-            sys.stdout.write(sources + "\n")
-    sys.stdout.flush()
-    perplexity.close()
-except KeyboardInterrupt:
-    sys.stderr.write("\n")
-    sys.stderr.flush()
-    raise SystemExit(130)
+raise SystemExit(main(sys.argv))
