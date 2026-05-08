@@ -78,7 +78,7 @@ class OutputWriterTest(unittest.TestCase):
             writer.write("\n")
             writer.close()
 
-        self.assertEqual(FakeRenderer.instances[0].rendered, ["# Hello", "\n"])
+        self.assertEqual(FakeRenderer.instances[0].rendered, ["# Hello\n"])
         self.assertTrue(FakeRenderer.instances[0].closed)
 
 
@@ -97,7 +97,7 @@ class CliRunTest(unittest.TestCase):
         self.assertEqual(FakePerplexity.instances[0].account, "me@example.com")
         self.assertEqual(FakePerplexity.instances[0].prompt, "hello world")
         self.assertEqual(FakePerplexity.instances[0].mode, "concise")
-        self.assertEqual(FakeRenderer.instances[0].rendered, ["# Hello", "\n\nWorld", "\n"])
+        self.assertEqual(FakeRenderer.instances[0].rendered, ["# Hello\n\n", "World\n"])
         self.assertTrue(FakeRenderer.instances[0].closed)
         self.assertTrue(FakePerplexity.instances[0].closed)
 

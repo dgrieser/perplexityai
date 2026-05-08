@@ -13,6 +13,7 @@ class OutputWriter:
         self.raw = raw
         self.stream = stream or sys.stdout
         self._renderer = None
+        self._buffer = ""
 
     def write(self, text: str) -> None:
         if not text:
@@ -23,12 +24,28 @@ class OutputWriter:
             self.stream.flush()
             return
 
-        self._streamdown().render(text)
+        self._buffer += text
+        last_para = self._buffer.rfind("\n\n")
+        if last_para >= 0:
+            to_render = self._buffer[:last_para + 2]
+            self._buffer = self._buffer[last_para + 2:]
+            self._render(to_render)
 
     def close(self) -> None:
+        if self._buffer:
+            self._render(self._buffer)
+            self._buffer = ""
         if self._renderer is not None:
             self._renderer.tidyup()
         self.stream.flush()
+
+    def _render(self, text: str) -> None:
+        renderer = self._streamdown()
+        if hasattr(renderer, "state"):
+            renderer.state.list_item_stack = []
+            renderer.state.in_list = False
+            renderer.state.list_indent_text = 0
+        renderer.render(text)
 
     def _streamdown(self):
         if self._renderer is None:
