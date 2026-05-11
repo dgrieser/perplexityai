@@ -68,14 +68,15 @@ class AnswerStreamParser:
         if not sources:
             return ""
 
-        lines = ["", "Sources:"]
+        lines = ["", "---", "", "## Sources", ""]
         for default_index, source in enumerate(sources, start=1):
             index = source.get("number", str(default_index))
             name = source.get("name") or source.get("url") or "Source"
             url = source.get("url", "")
-            lines.append(f"[{index}] {name}")
             if url:
-                lines.append(f"    {url}")
+                lines.append(f"- **[{index}]** [{name}]({url})")
+            else:
+                lines.append(f"- **[{index}]** {name}")
         return "\n".join(lines)
 
     def _collect_sources(self, event: Dict[str, Any]) -> None:
@@ -180,12 +181,13 @@ class AnswerStreamParser:
         return "`".join(parts)
 
     def _space_citations(self, text: str) -> str:
-        def add_space(match: Match[str]) -> str:
+        def format_marker(match: Match[str]) -> str:
+            formatted = f"`{match.group(0)}`"
             if match.start() == 0:
-                return match.group(1)
-            return " " + match.group(1)
+                return formatted
+            return " " + formatted
 
-        return sub(r"(?<![\s\[])(\[\d+\](?:\[\d+\])*)", add_space, text)
+        return sub(r"(?<![\s\[`])\[\d+\](?:\[\d+\])*", format_marker, text)
 
     def _stable_answer_text(self, text: str) -> str:
         incomplete_marker = search(r"(?<![\s\[])\[\d*$", text)
@@ -221,7 +223,7 @@ class AnswerStreamParser:
                     markers[end].append(number)
 
         return {
-            offset: "".join(f"[{number}]" for number in sorted(numbers))
+            offset: "".join(f"`[{number}]`" for number in sorted(numbers))
             for offset, numbers in markers.items()
         }
 

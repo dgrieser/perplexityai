@@ -14,6 +14,7 @@ class OutputWriter:
         self.stream = stream or sys.stdout
         self._renderer = None
         self._buffer = ""
+        self._started = False
 
     def write(self, text: str) -> None:
         if not text:
@@ -36,16 +37,23 @@ class OutputWriter:
             self._render(self._buffer)
             self._buffer = ""
         if self._renderer is not None:
+            self._render_trailing()
             self._renderer.tidyup()
         self.stream.flush()
 
     def _render(self, text: str) -> None:
         renderer = self._streamdown()
+        if not self._started:
+            self._started = True
+            renderer.render("\n")
         if hasattr(renderer, "state"):
             renderer.state.list_item_stack = []
             renderer.state.in_list = False
             renderer.state.list_indent_text = 0
         renderer.render(text)
+
+    def _render_trailing(self) -> None:
+        self._streamdown().render("\n")
 
     def _streamdown(self):
         if self._renderer is None:
@@ -54,9 +62,38 @@ class OutputWriter:
 
 
 def _load_streamdown():
-    from streamdown import Streamdown
+    import shutil
+    import streamdown
+    import streamdown.sdlib as sdlib
 
-    return Streamdown()
+    sd = streamdown.Streamdown()
+    sd.setup()
+    _patch_streamdown(sd, sdlib)
+    return sd
+
+
+def _patch_streamdown(sd, sdlib) -> None:
+    terminal_cols = shutil.get_terminal_size().columns
+    sd.state.WidthArg = min(terminal_cols, 100)
+    sd.width_calc()
+
+    orig_emit_h = sdlib.emit_h
+
+    def emit_h_left(level, text):
+        from streamdown.sdlib import line_format, text_wrap, BOLD, FG, FGRESET
+
+        if level > 2:
+            return orig_emit_h(level, text)
+        text = line_format(text)
+        res = []
+        for line in text_wrap(text):
+            if level == 1:
+                res.append(f"{sd.state.space_left()}\n{sd.state.space_left()}{BOLD[0]}{line}{BOLD[1]}\n")
+            else:
+                res.append(f"{sd.state.space_left()}\n{sd.state.space_left()}{BOLD[0]}{FG}{sd.Style.Bright}{line}{BOLD[1]}{FGRESET}")
+        return "\n".join(res)
+
+    sdlib.emit_h = emit_h_left
 
 
 def build_parser() -> argparse.ArgumentParser:
