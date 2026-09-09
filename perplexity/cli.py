@@ -1,4 +1,5 @@
 import argparse
+import shutil
 import sys
 from typing import Optional, TextIO
 
@@ -62,7 +63,6 @@ class OutputWriter:
 
 
 def _load_streamdown():
-    import shutil
     import streamdown
     import streamdown.sdlib as sdlib
 
