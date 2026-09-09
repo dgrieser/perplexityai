@@ -48,6 +48,35 @@ def mail_config_for(account: str) -> Optional[dict]:
             return mail_config
     return None
 
+MAIL_SECURITY_CHOICES = ("ssl", "starttls", "none")
+DEFAULT_PORTS = {"ssl": 993, "starttls": 143, "none": 143}
+
+
+def mail_security(mail_config: dict) -> str:
+    """Return the transport security for a mail config.
+
+    Configs written before the setting existed only carry a port, so the
+    historic mapping (993 means implicit TLS, anything else STARTTLS) is used
+    as the fallback.
+    """
+    security = str(mail_config.get("security", "")).strip().lower()
+    if security in MAIL_SECURITY_CHOICES:
+        return security
+    return "ssl" if int(mail_config["port"]) == 993 else "starttls"
+
+
+def connect_mailbox(mail_config: dict):
+    security = mail_security(mail_config)
+    hostname = mail_config["imap_hostname"]
+    port = int(mail_config["port"])
+    if security == "ssl":
+        return IMAP4_SSL(hostname, port)
+    mailbox = IMAP4(hostname, port)
+    if security == "starttls":
+        mailbox.starttls()
+    return mailbox
+
+
 def loop_input(prompt: str, default: Optional[str] = None, validator: Optional[Callable[[str], bool]] = None) -> str:
     while True:
         value = input(prompt).strip()
@@ -73,6 +102,12 @@ def is_valid_port(value: str) -> bool:
     is_valid = 1 <= port <= 65535
     if not is_valid:
         stderr.write("ERROR: Port number must be between 1 and 65535.\n\n")
+    return is_valid
+
+def is_valid_security(value: str) -> bool:
+    is_valid = value.lower() in MAIL_SECURITY_CHOICES
+    if not is_valid:
+        stderr.write(f"ERROR: Security must be one of {', '.join(MAIL_SECURITY_CHOICES)}.\n\n")
     return is_valid
 
 def is_valid_email(value: str) -> bool:
@@ -125,7 +160,17 @@ def configure_mail() -> None:
     imap_hostname_default = existing_mail_config.get("imap_hostname")
     imap_hostname_prompt = f"IMAP Server [{imap_hostname_default}]: " if imap_hostname_default else "IMAP Server: "
     imap_hostname = loop_input(imap_hostname_prompt, imap_hostname_default)
-    port_default = str(existing_mail_config.get("port", 993))
+    security_default = mail_security(existing_mail_config) if existing_mail_config else "ssl"
+    stderr.write("\nTransport security: ssl (implicit TLS), starttls or none (unencrypted).\n")
+    security = loop_input(f"Security [{security_default}]: ", security_default, is_valid_security).lower()
+    if security == "none":
+        stderr.write("WARNING: Without encryption the IMAP username, password and mail\n"
+                     "         contents travel over the network in plain text.\n")
+    existing_port = existing_mail_config.get("port")
+    if existing_port and security == security_default:
+        port_default = str(existing_port)
+    else:
+        port_default = str(DEFAULT_PORTS[security])
     port_text = loop_input(f"Port [{port_default}]: ", port_default, is_valid_port)
     port = int(port_text)
     folder_default = existing_mail_config.get("folder", "INBOX")
@@ -140,6 +185,7 @@ def configure_mail() -> None:
         "username": username,
         "password": password,
         "imap_hostname": imap_hostname,
+        "security": security,
         "port": port,
         "folder": folder,
         "delete_signin_messages": delete_signin_messages,
@@ -155,12 +201,7 @@ def configure_mail() -> None:
 
 
 def validate_mail_config(mail_config: dict) -> None:
-    port = int(mail_config["port"])
-    if port == 993:
-        mailbox = IMAP4_SSL(mail_config["imap_hostname"], port)
-    else:
-        mailbox = IMAP4(mail_config["imap_hostname"], port)
-        mailbox.starttls()
+    mailbox = connect_mailbox(mail_config)
     try:
         status, _ = mailbox.login(mail_config["username"], mail_config["password"])
         if status != "OK":
@@ -222,12 +263,7 @@ def retrieve_login_url_from_mail(account: str, mail_config: dict, timeout: float
 
 
 def _check_mailbox(account: str, mail_config: dict) -> Optional[str]:
-    port = int(mail_config["port"])
-    if port == 993:
-        mailbox = IMAP4_SSL(mail_config["imap_hostname"], port)
-    else:
-        mailbox = IMAP4(mail_config["imap_hostname"], port)
-        mailbox.starttls()
+    mailbox = connect_mailbox(mail_config)
     try:
         mailbox.login(mail_config["username"], mail_config["password"])
         mailbox.select(mail_config.get("folder", "INBOX"))

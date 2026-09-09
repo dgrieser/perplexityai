@@ -10,9 +10,11 @@ from perplexity.config import (
     _check_mailbox,
     configure_mail,
     extract_perplexity_login_url,
+    is_valid_security,
     is_valid_yes_no,
     load_config,
     mail_config_for,
+    mail_security,
     parse_yes_no,
     save_config,
     validate_mail_config,
@@ -208,6 +210,53 @@ class MailConfigValidationTest(unittest.TestCase):
 
         self.assertTrue(FakeMailbox.instances[0].started_tls)
 
+    def test_validates_plain_mail_config(self):
+        with patch("perplexity.config.IMAP4", FakeMailbox):
+            validate_mail_config(
+                {
+                    "username": "imap-user",
+                    "password": "secret",
+                    "imap_hostname": "imap.example.com",
+                    "security": "none",
+                    "port": 143,
+                }
+            )
+
+        mailbox = FakeMailbox.instances[0]
+        self.assertEqual(mailbox.port, 143)
+        self.assertFalse(mailbox.started_tls)
+        self.assertTrue(mailbox.logged_out)
+
+    def test_security_setting_overrides_port_defaults(self):
+        self.assertEqual(mail_security({"port": 993}), "ssl")
+        self.assertEqual(mail_security({"port": 143}), "starttls")
+        self.assertEqual(mail_security({"port": 993, "security": "none"}), "none")
+        self.assertEqual(mail_security({"port": 143, "security": "SSL"}), "ssl")
+        self.assertEqual(mail_security({"port": 143, "security": "bogus"}), "starttls")
+
+    def test_accepts_security_values(self):
+        for value in ["ssl", "STARTTLS", "none"]:
+            self.assertTrue(is_valid_security(value))
+
+        with patch("perplexity.config.stderr", StringIO()):
+            self.assertFalse(is_valid_security("plain"))
+
+    def test_configure_mail_saves_plain_security_with_default_port(self):
+        answers = iter(["login@example.com", "", "imap-user", "imap.example.com", "none", "", "", ""])
+
+        with TemporaryDirectory() as tmp:
+            with patch("perplexity.config.Path.home", return_value=Path(tmp)):
+                with patch("perplexity.config.input", side_effect=lambda _prompt: next(answers)):
+                    with patch("perplexity.config.getpass", return_value="secret"):
+                        with patch("perplexity.config.IMAP4", FakeMailbox):
+                            with patch("perplexity.config.stderr", StringIO()):
+                                configure_mail()
+
+                mail_config = load_config()["mail"]["accounts"]["login@example.com"]
+                self.assertEqual(mail_config["security"], "none")
+                self.assertEqual(mail_config["port"], 143)
+                self.assertFalse(FakeMailbox.instances[0].started_tls)
+
     def test_validates_configured_folder(self):
         with patch("perplexity.config.IMAP4_SSL", FakeMailbox):
             validate_mail_config(
@@ -234,7 +283,7 @@ class MailConfigValidationTest(unittest.TestCase):
             self.assertFalse(is_valid_yes_no("sure"))
 
     def test_configure_mail_does_not_save_invalid_mail_config(self):
-        answers = iter(["login@example.com", "", "imap-user", "imap.example.com", "993", "INBOX", ""])
+        answers = iter(["login@example.com", "", "imap-user", "imap.example.com", "ssl", "993", "INBOX", ""])
 
         with TemporaryDirectory() as tmp:
             with patch("perplexity.config.Path.home", return_value=Path(tmp)):
@@ -248,7 +297,7 @@ class MailConfigValidationTest(unittest.TestCase):
                 self.assertEqual(load_config(), {})
 
     def test_configure_mail_saves_default_folder(self):
-        answers = iter(["login@example.com", "", "imap-user", "imap.example.com", "993", "", ""])
+        answers = iter(["login@example.com", "", "imap-user", "imap.example.com", "ssl", "993", "", ""])
 
         with TemporaryDirectory() as tmp:
             with patch("perplexity.config.Path.home", return_value=Path(tmp)):
@@ -264,7 +313,7 @@ class MailConfigValidationTest(unittest.TestCase):
                 self.assertEqual(FakeMailbox.instances[0].selected_mailbox, "INBOX")
 
     def test_configure_mail_saves_no_delete_signin_messages(self):
-        answers = iter(["login@example.com", "", "imap-user", "imap.example.com", "993", "", "No"])
+        answers = iter(["login@example.com", "", "imap-user", "imap.example.com", "ssl", "993", "", "No"])
 
         with TemporaryDirectory() as tmp:
             with patch("perplexity.config.Path.home", return_value=Path(tmp)):
@@ -278,7 +327,7 @@ class MailConfigValidationTest(unittest.TestCase):
                 self.assertFalse(mail_config["delete_signin_messages"])
 
     def test_configure_mail_uses_existing_account_values_as_defaults(self):
-        answers = iter(["login@example.com", "", "", "", "", "", ""])
+        answers = iter(["login@example.com", "", "", "", "", "", "", ""])
         prompts = []
         password_prompts = []
         stderr = StringIO()
@@ -322,6 +371,7 @@ class MailConfigValidationTest(unittest.TestCase):
                 self.assertEqual(mail_config["username"], "imap-user")
                 self.assertEqual(mail_config["password"], "secret")
                 self.assertEqual(mail_config["imap_hostname"], "imap.example.com")
+                self.assertEqual(mail_config["security"], "starttls")
                 self.assertEqual(mail_config["port"], 143)
                 self.assertEqual(mail_config["folder"], "Archive/Perplexity")
                 self.assertFalse(mail_config["delete_signin_messages"])
@@ -329,6 +379,7 @@ class MailConfigValidationTest(unittest.TestCase):
         self.assertIn("Email Address [mailbox@example.com]: ", prompts)
         self.assertIn("Username [imap-user]: ", prompts)
         self.assertIn("IMAP Server [imap.example.com]: ", prompts)
+        self.assertIn("Security [starttls]: ", prompts)
         self.assertIn("Port [143]: ", prompts)
         self.assertIn("Folder [Archive/Perplexity]: ", prompts)
         self.assertIn("Delete Sign-in Messages [y/N]? ", prompts)
@@ -338,7 +389,7 @@ class MailConfigValidationTest(unittest.TestCase):
         self.assertIn("Validating IMAP login details...\nIMAP login details validated.\n", stderr.getvalue())
 
     def test_configure_mail_lists_existing_accounts(self):
-        answers = iter(["new@example.com", "", "imap-user", "imap.example.com", "993", "", ""])
+        answers = iter(["new@example.com", "", "imap-user", "imap.example.com", "ssl", "993", "", ""])
         stderr = StringIO()
 
         with TemporaryDirectory() as tmp:
