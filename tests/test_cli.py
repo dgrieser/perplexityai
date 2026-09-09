@@ -54,6 +54,14 @@ class FakePerplexity:
         self.closed = True
 
 
+class FakePerplexityWithThread(FakePerplexity):
+    def search(self, prompt, mode):
+        events = super().search(prompt, mode)
+        for event in events:
+            event["thread_url_slug"] = "thread-slug-123"
+        return events
+
+
 class OutputWriterTest(unittest.TestCase):
     def setUp(self):
         FakeRenderer.instances = []
@@ -67,18 +75,20 @@ class OutputWriterTest(unittest.TestCase):
             writer.write("\n")
             writer.close()
 
-        self.assertEqual(stream.getvalue(), "# Hello\n")
+        self.assertEqual(stream.getvalue(), "\n# Hello\n")
         self.assertEqual(FakeRenderer.instances, [])
 
     def test_rendered_output_uses_streamdown_and_tidyup(self):
-        writer = OutputWriter(raw=False, stream=StringIO())
+        stream = StringIO()
+        writer = OutputWriter(raw=False, stream=stream)
 
         with patch("perplexity.cli._load_streamdown", side_effect=FakeRenderer):
             writer.write("# Hello")
             writer.write("\n")
             writer.close()
 
-        self.assertEqual(FakeRenderer.instances[0].rendered, ["\n", "# Hello\n", "\n"])
+        self.assertEqual(stream.getvalue(), "\n")
+        self.assertEqual(FakeRenderer.instances[0].rendered, ["# Hello\n", "\n"])
         self.assertTrue(FakeRenderer.instances[0].closed)
 
 
@@ -97,7 +107,7 @@ class CliRunTest(unittest.TestCase):
         self.assertEqual(FakePerplexity.instances[0].account, "me@example.com")
         self.assertEqual(FakePerplexity.instances[0].prompt, "hello world")
         self.assertEqual(FakePerplexity.instances[0].mode, "concise")
-        self.assertEqual(FakeRenderer.instances[0].rendered, ["\n", "# Hello\n\n", "World\n", "\n"])
+        self.assertEqual(FakeRenderer.instances[0].rendered, ["# Hello\n\n", "World\n", "\n"])
         self.assertTrue(FakeRenderer.instances[0].closed)
         self.assertTrue(FakePerplexity.instances[0].closed)
 
@@ -109,9 +119,34 @@ class CliRunTest(unittest.TestCase):
             with patch("perplexity.cli.sys.stdout", stream):
                 self.assertEqual(run(args), 0)
 
-        self.assertEqual(stream.getvalue(), "# Hello\n\nWorld\n")
+        self.assertEqual(stream.getvalue(), "\n# Hello\n\nWorld\n")
         self.assertEqual(FakePerplexity.instances[0].mode, "copilot")
         self.assertEqual(FakeRenderer.instances, [])
+
+    def test_run_prints_thread_url(self):
+        args = build_parser().parse_args(["--raw", "hello"])
+        stream = StringIO()
+
+        with patch("perplexity.cli.Perplexity", FakePerplexityWithThread):
+            with patch("perplexity.cli.sys.stdout", stream):
+                self.assertEqual(run(args), 0)
+
+        self.assertTrue(
+            stream.getvalue().endswith(
+                "\nhttps://www.perplexity.ai/search/thread-slug-123\n"
+            ),
+            stream.getvalue(),
+        )
+
+    def test_run_omits_thread_url_when_disabled(self):
+        args = build_parser().parse_args(["--raw", "--no-url", "hello"])
+        stream = StringIO()
+
+        with patch("perplexity.cli.Perplexity", FakePerplexityWithThread):
+            with patch("perplexity.cli.sys.stdout", stream):
+                self.assertEqual(run(args), 0)
+
+        self.assertNotIn("perplexity.ai/search", stream.getvalue())
 
 
 if __name__ == "__main__":

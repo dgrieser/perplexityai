@@ -22,6 +22,7 @@ class OutputWriter:
             return
 
         if self.raw:
+            self._begin()
             self.stream.write(text)
             self.stream.flush()
             return
@@ -43,15 +44,19 @@ class OutputWriter:
         self.stream.flush()
 
     def _render(self, text: str) -> None:
+        self._begin()
         renderer = self._streamdown()
-        if not self._started:
-            self._started = True
-            renderer.render("\n")
         if hasattr(renderer, "state"):
             renderer.state.list_item_stack = []
             renderer.state.in_list = False
             renderer.state.list_indent_text = 0
         renderer.render(text)
+
+    def _begin(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        self.stream.write("\n")
 
     def _render_trailing(self) -> None:
         self._streamdown().render("\n")
@@ -102,6 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-r", "--raw", action="store_true", help="print parsed markdown without terminal rendering")
     parser.add_argument("-s", "--sources", action="store_true", help="append sources")
     parser.add_argument("-p", "--pro", action="store_true", help="use Pro search")
+    parser.add_argument("--no-url", action="store_true", help="do not print the perplexity thread url")
     parser.add_argument("prompt", nargs="+", help="search prompt")
     return parser
 
@@ -136,6 +142,11 @@ def run(args: argparse.Namespace) -> int:
             sources = stream_parser.format_sources(cited_only=stream_parser.has_citations())
             if sources:
                 writer.write(sources + "\n")
+
+        if not args.no_url:
+            url = stream_parser.thread_url()
+            if url:
+                writer.write(f"\n{url}\n")
         return 0
     finally:
         try:

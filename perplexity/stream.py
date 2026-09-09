@@ -5,15 +5,19 @@ from typing import Any, Dict, Iterable, Optional
 class AnswerStreamParser:
     """Extract live answer text deltas from Perplexity websocket events."""
 
+    THREAD_URL_BASE = "https://www.perplexity.ai/search"
+
     def __init__(self) -> None:
         self.text = ""
         self.raw_text = ""
+        self.thread_slug: Optional[str] = None
         self._chunk_count = 0
         self._source_urls: set[str] = set()
         self._annotations: list[dict[str, Any]] = []
         self.sources: list[dict[str, str]] = []
 
     def feed(self, event: Dict[str, Any]) -> str:
+        self._collect_thread_slug(event)
         self._collect_sources(event)
         state = self._event_state(event)
         if state is None:
@@ -78,6 +82,20 @@ class AnswerStreamParser:
             else:
                 lines.append(f"- **[{index}]** {name}")
         return "\n".join(lines)
+
+    def thread_url(self) -> str:
+        if not self.thread_slug:
+            return ""
+        return f"{self.THREAD_URL_BASE}/{self.thread_slug}"
+
+    def _collect_thread_slug(self, event: Dict[str, Any]) -> None:
+        if self.thread_slug:
+            return
+        for key in ("thread_url_slug", "backend_uuid"):
+            value = event.get(key)
+            if isinstance(value, str) and value:
+                self.thread_slug = value
+                return
 
     def _collect_sources(self, event: Dict[str, Any]) -> None:
         blocks = event.get("blocks")
