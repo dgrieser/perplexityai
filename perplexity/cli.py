@@ -9,6 +9,10 @@ from perplexity.config import configure_mail
 from perplexity import AnswerStreamParser, Perplexity
 
 
+LIGHT_GREY = "\033[38;5;250m"
+COLOR_RESET = "\033[0m"
+
+
 class OutputWriter:
     def __init__(self, raw: bool = False, stream: Optional[TextIO] = None) -> None:
         self.raw = raw
@@ -33,6 +37,15 @@ class OutputWriter:
             to_render = self._buffer[:last_para + 2]
             self._buffer = self._buffer[last_para + 2:]
             self._render(to_render)
+
+    def dim(self, text: str) -> str:
+        if not text or not self._colors_enabled():
+            return text
+        return f"{LIGHT_GREY}{text}{COLOR_RESET}"
+
+    def _colors_enabled(self) -> bool:
+        isatty = getattr(self.stream, "isatty", None)
+        return bool(isatty and isatty())
 
     def close(self) -> None:
         if self._buffer:
@@ -146,7 +159,7 @@ def run(args: argparse.Namespace) -> int:
         if not args.no_url:
             url = stream_parser.thread_url()
             if url:
-                writer.write(f"\n{url}\n")
+                writer.write(f"\n{writer.dim(url)}\n")
         return 0
     finally:
         try:

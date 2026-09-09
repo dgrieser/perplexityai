@@ -62,6 +62,11 @@ class FakePerplexityWithThread(FakePerplexity):
         return events
 
 
+class TtyStringIO(StringIO):
+    def isatty(self):
+        return True
+
+
 class OutputWriterTest(unittest.TestCase):
     def setUp(self):
         FakeRenderer.instances = []
@@ -135,6 +140,19 @@ class CliRunTest(unittest.TestCase):
             stream.getvalue().endswith(
                 "\nhttps://www.perplexity.ai/search/thread-slug-123\n"
             ),
+            stream.getvalue(),
+        )
+
+    def test_run_colors_thread_url_on_tty(self):
+        args = build_parser().parse_args(["--raw", "hello"])
+        stream = TtyStringIO()
+
+        with patch("perplexity.cli.Perplexity", FakePerplexityWithThread):
+            with patch("perplexity.cli.sys.stdout", stream):
+                self.assertEqual(run(args), 0)
+
+        self.assertIn(
+            "\n\033[38;5;250mhttps://www.perplexity.ai/search/thread-slug-123\033[0m\n",
             stream.getvalue(),
         )
 
